@@ -32,7 +32,7 @@ class FitnessCalendarPage extends StatefulWidget {
 class _FitnessCalendarPageState extends State<FitnessCalendarPage> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
-  Map<DateTime, List<FitnessLog>> _events = {}; // 数据库的缓存
+  final Map<DateTime, List<FitnessLog>> _events = {}; // 数据库的缓存
 
   @override
   void initState() {
