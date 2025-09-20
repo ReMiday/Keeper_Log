@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 
-import 'fitness_log.dart';
+import 'fitness_log_databass.dart';
 
 void main() {
   runApp(const MyApp());
@@ -32,34 +32,47 @@ class FitnessCalendarPage extends StatefulWidget {
 class _FitnessCalendarPageState extends State<FitnessCalendarPage> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
-  final Map<DateTime, List<FitnessLog>> _events = {}; // 数据库的缓存
+  Set<DateTime> _doneDays = {};
 
   @override
   void initState() {
     super.initState();
-    _loadAllLogs();
+    _loadAllDays();
   }
 
-  Future<void> _loadAllLogs() async {
-    final logs = await FitnessLogDatabase.getAllLogs();
+  Future<void> _loadAllDays() async {
+    final days = await FitnessDayDatabase.getAllDays();
     setState(() {
-      _events.clear();
-      for (var log in logs) {
-        final key = DateTime(log.date.year, log.date.month, log.date.day);
-        if (_events[key] == null) _events[key] = [];
-        _events[key]!.add(log);
-      }
+      _doneDays = days
+          .where((d) => d.done)
+          .map((d) => DateTime(d.date.year, d.date.month, d.date.day))
+          .toSet();
     });
   }
 
-  List<FitnessLog> _getLogsForDay(DateTime day) {
-    return _events[DateTime(day.year, day.month, day.day)] ?? [];
+  bool _isDone(DateTime day) {
+    final key = DateTime(day.year, day.month, day.day);
+    return _doneDays.contains(key);
+  }
+
+  Future<void> _handleDayTap(DateTime selectedDay, DateTime focusedDay) async {
+    if (_selectedDay != null && isSameDay(_selectedDay, selectedDay)) {
+      // 再次点击同一天 → 切换打勾
+      await FitnessDayDatabase.toggleDay(selectedDay);
+      await _loadAllDays();
+    } else {
+      // 第一次点击 → 切换选中日期
+      setState(() {
+        _selectedDay = selectedDay;
+        _focusedDay = focusedDay;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("健身日志")),
+      appBar: AppBar(title: Text("健身日历")),
       body: Column(
         children: [
           TableCalendar(
@@ -67,58 +80,58 @@ class _FitnessCalendarPageState extends State<FitnessCalendarPage> {
             lastDay: DateTime.utc(2030, 12, 31),
             focusedDay: _focusedDay,
             selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-            eventLoader: _getLogsForDay,
-            onDaySelected: (selectedDay, focusedDay) {
-              setState(() {
-                _selectedDay = selectedDay;
-                _focusedDay = focusedDay;
-              });
-              _showAddLogDialog(selectedDay);
-            },
-          ),
-          Expanded(
-            child: FutureBuilder<List<FitnessLog>>(
-              future: FitnessLogDatabase.getLogsByDate(_selectedDay ?? DateTime.now()),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return Center(child: Text("暂无记录"));
-                final logs = snapshot.data!;
-                if (logs.isEmpty) return Center(child: Text("这一天没有记录"));
-                return ListView(
-                  children: logs.map((log) => ListTile(title: Text(log.content))).toList(),
+            calendarBuilders: CalendarBuilders(
+              defaultBuilder: (context, day, focusedDay) {
+                final isMarked = _isDone(day);
+                return Center(
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Text("${day.day}"),
+                      if (isMarked)
+                        Positioned(
+                          bottom: 2,
+                          child: Icon(Icons.check, size: 14, color: Colors.green),
+                        ),
+                    ],
+                  ),
+                );
+              },
+              selectedBuilder: (context, day, focusedDay) {
+                final isMarked = _isDone(day);
+                return Container(
+                  decoration: BoxDecoration(
+                    color: Colors.blueAccent,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Text("${day.day}", style: TextStyle(color: Colors.white)),
+                      if (isMarked)
+                        Positioned(
+                          bottom: 2,
+                          child: Icon(Icons.check, size: 14, color: Colors.white),
+                        ),
+                    ],
+                  ),
                 );
               },
             ),
+            onDaySelected: _handleDayTap,
           ),
-        ],
-      ),
-    );
-  }
-
-  void _showAddLogDialog(DateTime day) {
-    TextEditingController controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text("添加健身日志"),
-        content: TextField(
-          controller: controller,
-          decoration: InputDecoration(hintText: "今天做了什么训练？"),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text("取消"),
-          ),
-          TextButton(
-            onPressed: () async {
-              final log = FitnessLog(date: day, content: controller.text);
-              await FitnessLogDatabase.insertLog(log);
-              await _loadAllLogs();
-              setState(() {});
-              Navigator.pop(context);
-            },
-            child: Text("保存"),
-          ),
+          Expanded(
+            child: Center(
+              child: Text(
+                _selectedDay == null
+                    ? "请选择日期"
+                    : (_isDone(_selectedDay!)
+                    ? "${_selectedDay!.toLocal()} ✅ 已健身"
+                    : "${_selectedDay!.toLocal()} ❌ 未健身"),
+              ),
+            ),
+          )
         ],
       ),
     );
